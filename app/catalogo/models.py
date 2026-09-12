@@ -29,6 +29,12 @@ class FiltroImovel(BaseModel):
 
     quartos_min: Optional[int] = None
     vagas_min: Optional[int] = None
+
+
+class ConsultaRAG(BaseModel):
+    consulta: str
+    limite: int = 5
+    filtros: Optional[FiltroImovel] = None
 from pydantic import BaseModel
 from typing import Optional
 
@@ -60,3 +66,8 @@ class FiltroImovel(BaseModel):
 
     quartos_min: Optional[int] = None
     vagas_min: Optional[int] = None
+    
+
+class ConsultaRAG(BaseModel):
+    consulta: str
+    limite: int = 5

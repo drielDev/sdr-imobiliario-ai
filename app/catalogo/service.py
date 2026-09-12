@@ -88,6 +88,75 @@ class CatalogoService:
             resultado.append(imovel)
 
         return resultado
+
+    def filtrar_imoveis(
+        self,
+        imoveis: list[Imovel],
+        filtros: FiltroImovel
+    ) -> list[Imovel]:
+
+        resultado = []
+
+        for imovel in imoveis:
+
+            if not imovel.disponivel:
+                continue
+
+            if (
+                filtros.finalidade
+                and imovel.finalidade.lower()
+                != filtros.finalidade.lower()
+            ):
+                continue
+
+            if (
+                filtros.tipo
+                and imovel.tipo.lower()
+                != filtros.tipo.lower()
+            ):
+                continue
+
+            if (
+                filtros.cidade
+                and filtros.cidade.lower()
+                not in imovel.cidade.lower()
+            ):
+                continue
+
+            if (
+                filtros.bairro
+                and filtros.bairro.lower()
+                not in imovel.bairro.lower()
+            ):
+                continue
+
+            if (
+                filtros.preco_min is not None
+                and imovel.preco < filtros.preco_min
+            ):
+                continue
+
+            if (
+                filtros.preco_max is not None
+                and imovel.preco > filtros.preco_max
+            ):
+                continue
+
+            if (
+                filtros.quartos_min is not None
+                and imovel.quartos < filtros.quartos_min
+            ):
+                continue
+
+            if (
+                filtros.vagas_min is not None
+                and imovel.vagas < filtros.vagas_min
+            ):
+                continue
+
+            resultado.append(imovel)
+
+        return resultado
 from app.catalogo.models import FiltroImovel, Imovel
 from app.catalogo.repository import ImovelRepository
 
