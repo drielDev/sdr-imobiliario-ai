@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Projeto de POC para um Agente SDR Imobiliário com IA Generativa. A solução cobre catálogo de imóveis, busca estruturada, busca semântica com RAG e exposição via API FastAPI.
+Projeto de POC para um Agente SDR Imobiliário com IA Generativa. A solução cobre catálogo de imóveis, busca estruturada, busca semântica com RAG, um agente de chat (Bia) com LLM via Gemini, e exposição via API FastAPI + interface web em React.
 
 ## Arquitetura da Solução
 
@@ -12,10 +12,17 @@ flowchart LR
     B --> C[CatalogoService]
     B --> D[ImovelRAG]
     D --> E[Chroma / chroma_db]
+    C --> T1[buscar_imoveis_estruturado]
+    D --> T2[buscar_imoveis_semantico]
+    T1 --> AG[AgenteSDR / Gemini]
+    T2 --> AG
+    AG --> CH[Endpoint /chat]
     D --> F[Endpoints /imoveis/rag]
     C --> G[Endpoints /imoveis/buscar]
     G --> H[FastAPI / docs]
     F --> H
+    CH --> H
+    H --> FE[Frontend React]
 ```
 
 ### Componentes
@@ -25,7 +32,46 @@ flowchart LR
 - [backend/app/catalogo/repository.py](backend/app/catalogo/repository.py): leitura da base de dados.
 - [backend/app/catalogo/service.py](backend/app/catalogo/service.py): filtros estruturados e regras de negócio.
 - [backend/app/catalogo/rag.py](backend/app/catalogo/rag.py): geração de documentos, embeddings, indexação e reranking.
-- [backend/app/api/imoveis.py](backend/app/api/imoveis.py): endpoints da API.
+- [backend/app/catalogo/instancias.py](backend/app/catalogo/instancias.py): instâncias únicas do serviço de catálogo e do RAG, compartilhadas entre API e agente.
+- [backend/app/api/imoveis.py](backend/app/api/imoveis.py): endpoints do catálogo.
+- [backend/app/agente/agente.py](backend/app/agente/agente.py): `AgenteSDR`, sessão de chat por cliente usando o SDK do Gemini (`google-genai`).
+- [backend/app/agente/prompts.py](backend/app/agente/prompts.py): system prompt da Bia (persona, tom de voz, regras de negócio).
+- [backend/app/agente/tools.py](backend/app/agente/tools.py): ferramentas (function calling) que o Gemini pode acionar para consultar o catálogo, estruturado ou semântico.
+- [backend/app/api/chat.py](backend/app/api/chat.py): endpoints do chat.
+- [frontend/src/components/ChatWidget.jsx](frontend/src/components/ChatWidget.jsx): widget de chat flutuante que conversa com a Bia.
+
+## Agente de Chat (LLM)
+
+A Bia é o agente conversacional do projeto: um SDR virtual que atende pelo chat, entende o que o cliente procura e busca imóveis reais do catálogo para responder.
+
+- **Modelo**: Google Gemini (`gemini-2.5-flash` por padrão), via SDK `google-genai`.
+- **Contexto**: cada `sessao_id` mantém sua própria sessão de chat em memória (`AgenteSDR._sessoes`), preservando o histórico da conversa entre mensagens.
+- **Function calling**: o modelo decide sozinho quando chamar `buscar_imoveis_estruturado` (critérios exatos: finalidade, tipo, cidade, bairro, preço, quartos, vagas) ou `buscar_imoveis_semantico` (pedidos vagos/descritivos, usa o pipeline de RAG).
+- **Regras de negócio**: o prompt (`prompts.py`) proíbe o modelo de inventar imóveis, preços ou características — só pode descrever o que as ferramentas retornaram na conversa.
+
+### Configuração
+
+Crie um arquivo `.env` em `backend/` com:
+
+```
+GEMINI_API_KEY=sua_chave_da_api_do_gemini
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Sem `GEMINI_API_KEY`, os endpoints de chat respondem `503`.
+
+### Endpoints do chat
+
+- `POST /chat/`: envia uma mensagem (`sessao_id`, `mensagem`) e recebe a resposta da Bia.
+- `GET /chat/{sessao_id}/historico`: retorna o histórico da sessão.
+- `POST /chat/{sessao_id}/reiniciar`: descarta o contexto da sessão.
+
+Também é possível conversar com a Bia direto pelo terminal:
+
+```
+cd backend
+python scripts/chat_cli.py
+```
 
 ## Fluxo do Pipeline RAG
 
