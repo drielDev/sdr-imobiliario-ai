@@ -9,6 +9,7 @@ __pycache__/
 # Distribution / packaging
 chroma_db/
 .Python
+.claude
 build/
 develop-eggs/
 dist/
@@ -149,7 +150,6 @@ activemq-data/
 *.sage.py
 
 # Environments
-.env
 .envrc
 .venv
 env/

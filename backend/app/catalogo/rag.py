@@ -12,7 +12,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 try:
     from sentence_transformers import CrossEncoder
-except ImportError:  # pragma: no cover - fallback em ambiente sem dependência
+except ImportError:  # pragma: no cover
     CrossEncoder = None
 
 from app.catalogo.models import FiltroImovel

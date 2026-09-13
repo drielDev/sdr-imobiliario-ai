@@ -1,21 +1,17 @@
 from fastapi import APIRouter, HTTPException
 
+from app.catalogo.instancias import rag, service
 from app.catalogo.models import (
     ConsultaRAG,
     FiltroImovel,
     Imovel
 )
-from app.catalogo.rag import ImovelRAG
-from app.catalogo.service import CatalogoService
 
 
 router = APIRouter(
     prefix="/imoveis",
     tags=["Imóveis"]
 )
-
-service = CatalogoService()
-rag = ImovelRAG()
 
 
 @router.get("/", response_model=list[Imovel])

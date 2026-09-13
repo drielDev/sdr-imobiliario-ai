@@ -20,12 +20,12 @@ flowchart LR
 
 ### Componentes
 
-- [data/imoveis.json](data/imoveis.json): base simulada de imóveis.
-- [app/catalogo/models.py](app/catalogo/models.py): modelos de domínio e payloads de busca.
-- [app/catalogo/repository.py](app/catalogo/repository.py): leitura da base de dados.
-- [app/catalogo/service.py](app/catalogo/service.py): filtros estruturados e regras de negócio.
-- [app/catalogo/rag.py](app/catalogo/rag.py): geração de documentos, embeddings, indexação e reranking.
-- [app/api/imoveis.py](app/api/imoveis.py): endpoints da API.
+- [backend/data/imoveis.json](backend/data/imoveis.json): base simulada de imóveis.
+- [backend/app/catalogo/models.py](backend/app/catalogo/models.py): modelos de domínio e payloads de busca.
+- [backend/app/catalogo/repository.py](backend/app/catalogo/repository.py): leitura da base de dados.
+- [backend/app/catalogo/service.py](backend/app/catalogo/service.py): filtros estruturados e regras de negócio.
+- [backend/app/catalogo/rag.py](backend/app/catalogo/rag.py): geração de documentos, embeddings, indexação e reranking.
+- [backend/app/api/imoveis.py](backend/app/api/imoveis.py): endpoints da API.
 
 ## Fluxo do Pipeline RAG
 
@@ -38,29 +38,37 @@ flowchart LR
 
 ## Executando o projeto
 
-### 1. Criar ambiente virtual
+Backend e frontend ficam em pastas separadas: `backend/` e `frontend/`.
+
+### Backend
+
+### 1. Entrar na pasta
+
+cd backend
+
+### 2. Criar ambiente virtual
 
 python -m venv .venv
 
-### 2. Ativar
+### 3. Ativar
 
 Windows:
 
 .venv\Scripts\activate
 
-### 3. Instalar dependências
+### 4. Instalar dependências
 
 pip install -r requirements.txt
 
-### 4. Rodar API
+### 5. Rodar API
 
 uvicorn app.main:app --reload
 
-### 5. Documentação
+### 6. Documentação
 
 http://localhost:8000/docs
 
-### 6. Indexar a base de imóveis
+### 7. Indexar a base de imóveis
 
 python scripts/indexar_imoveis.py
 
@@ -71,6 +79,12 @@ python scripts/indexar_imoveis.py --reindexar
 Para indexar sem a validação final:
 
 python scripts/indexar_imoveis.py --sem-validacao
+
+### Frontend
+
+cd frontend
+npm install
+npm run dev
 
 
 # Catálogo de imóveis
@@ -150,7 +164,7 @@ Exemplo com filtros estruturados:
 
 ## Pipeline de Dados
 
-- A base de imóveis fica em `data/imoveis.json`.
+- A base de imóveis fica em `backend/data/imoveis.json`.
 - O repositório carrega os dados e transforma cada item em um modelo `Imovel`.
 - O RAG converte imóveis em documentos de contexto para a busca semântica.
 - O Chroma persiste os embeddings localmente em `chroma_db`.
@@ -166,6 +180,7 @@ Exemplo com filtros estruturados:
 
 Para validar a busca semântica fora da API, execute:
 
+cd backend
 python teste_rag.py
 
 O script imprime a resposta em JSON.
