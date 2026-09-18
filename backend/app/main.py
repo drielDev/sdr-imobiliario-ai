@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.chat import router as chat_router
 from app.api.imoveis import router as imoveis_router
+from app.api.leads import router as leads_router
 
 load_dotenv()
 
@@ -47,4 +48,8 @@ app.include_router(
 
 app.include_router(
     chat_router
+)
+
+app.include_router(
+    leads_router
 )

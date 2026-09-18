@@ -38,6 +38,8 @@ flowchart LR
 - [backend/app/agente/prompts.py](backend/app/agente/prompts.py): system prompt da Bia (persona, tom de voz, regras de negócio).
 - [backend/app/agente/tools.py](backend/app/agente/tools.py): ferramentas (function calling) que o Gemini pode acionar para consultar o catálogo, estruturado ou semântico.
 - [backend/app/api/chat.py](backend/app/api/chat.py): endpoints do chat.
+- [backend/app/qualificacao/](backend/app/qualificacao/): qualificação de leads, classificação, agendamento, follow-up e resumo para o corretor (ver seção própria abaixo).
+- [backend/app/api/leads.py](backend/app/api/leads.py): endpoints de leads, agendamento e follow-up.
 - [frontend/src/components/ChatWidget.jsx](frontend/src/components/ChatWidget.jsx): widget de chat flutuante que conversa com a Bia.
 
 ## Agente de Chat (LLM)
@@ -230,3 +232,109 @@ cd backend
 python teste_rag.py
 
 O script imprime a resposta em JSON.
+
+# Qualificação de Leads (Qualificação + Automação)
+
+Módulo responsável pela lógica comercial do SDR: o que perguntar a seguir,
+como classificar o lead (quente/morno/frio), agendamento de reuniões/visitas,
+follow-up de leads inativos e o resumo estruturado para o corretor.
+
+Fica isolado em [backend/app/qualificacao/](backend/app/qualificacao/) e é
+consumido pelos outros módulos via funções/serviços — sem acoplamento com
+prompt/LLM (Pessoa 1), catálogo/RAG (Pessoa 2) ou interface (Pessoa 4).
+
+## Responsabilidades
+
+- **Modelo do lead e qualificação** ([models.py](backend/app/qualificacao/models.py), [campos.py](backend/app/qualificacao/campos.py), [qualificacao.py](backend/app/qualificacao/qualificacao.py)): entidade `Lead`, campos obrigatórios por intenção (declarados em [config.py](backend/app/qualificacao/config.py)), cálculo do próximo campo a perguntar e merge de dados extraídos sem apagar histórico.
+- **Classificação** ([classificacao.py](backend/app/qualificacao/classificacao.py)): pontuação explicável (urgência, completude dos dados, faixa de valor definida, intenção clara, engajamento recente, penalidade por follow-up sem resposta) que resulta em quente/morno/frio + motivos.
+- **Agendamento** ([agendamento.py](backend/app/qualificacao/agendamento.py)): agenda simulada de slots (corretor/especialista), sem conflito de horário, com roteamento automático (lead de investimento → especialista; lead com imóvel de interesse → visita; demais → corretor).
+- **Follow-up** ([followup.py](backend/app/qualificacao/followup.py)): identifica leads elegíveis para a próxima tentativa (intervalos e número máximo configuráveis), templates de mensagem por tentativa, e encerra (inativa) o lead ao esgotar as tentativas.
+- **Resumo para o corretor** ([resumo.py](backend/app/qualificacao/resumo.py)): resumo estruturado determinístico (sem depender de LLM), com ponto de extensão opcional para enriquecer com um cliente LLM injetado.
+
+## Interfaces públicas (o que outros módulos chamam)
+
+**Pessoa 1 (Agente/LLM)** — depois de extrair dados da conversa, envia um
+`DadosExtraidosLead` (todos os campos opcionais) para atualizar o lead, e usa
+`campos_faltantes`/`proximo_campo_prioritario` para saber o que perguntar a
+seguir (a frase da pergunta é responsabilidade dela, não deste módulo):
+
+```python
+from app.qualificacao.qualificacao import criar_lead, atualizar_lead
+from app.qualificacao.campos import proximo_campo_prioritario
+from app.qualificacao.models import DadosExtraidosLead
+from app.qualificacao.instancias import lead_repository, relogio
+
+lead = criar_lead(lead_repository, lead_id, canal="whatsapp", contato="+55...", relogio=relogio)
+
+lead = atualizar_lead(
+    lead_repository,
+    lead_id,
+    DadosExtraidosLead(intencao="compra", regiao="Moema"),
+    relogio=relogio,
+)
+
+proximo_campo_prioritario(lead)  # -> "preco_max", por exemplo, ou None se já está tudo
+```
+
+**Pessoa 2 (Imóveis + RAG)** — nenhuma dependência direta. O lead só guarda
+`imovel_interesse_id` (um `int`), sem validar contra o catálogo.
+
+**Pessoa 4 (Interface + integração)** — pode chamar os serviços Python
+diretamente (mesmo processo) ou usar a API REST em `/leads` (registrada em
+`main.py`, mesmo padrão de `/imoveis` e `/chat`):
+
+- `POST /leads/` — cria lead (`canal`, `contato`, `id` opcional).
+- `GET /leads/` — lista leads. `GET /leads/{id}` — obtém um lead.
+- `PATCH /leads/{id}` — atualiza com `DadosExtraidosLead`.
+- `GET /leads/{id}/proximo-campo` — próximo campo a perguntar + campos faltantes.
+- `GET /leads/{id}/classificacao` — reclassifica e retorna temperatura + motivos.
+- `GET /leads/{id}/resumo` — resumo estruturado para o corretor.
+- `GET /leads/agendamentos/slots?tipo=` — slots disponíveis.
+- `POST /leads/{id}/agendamentos` — agenda (`slot_id`, `tipo` opcional, `imovel_id` opcional).
+- `PATCH /leads/agendamentos/{id}/reagendar` — reagenda (`novo_slot_id`).
+- `DELETE /leads/agendamentos/{id}` — cancela.
+- `GET /leads/followup/elegiveis` — leads elegíveis agora + estratégia sugerida.
+- `POST /leads/{id}/followup/tentativa` — registra que uma tentativa foi enviada.
+
+Para o **follow-up** especificamente, este módulo **não envia mensagem nem
+tem cron/job**: só decide quem e o quê. A Pessoa 4 implementa o Protocol
+`CanalNotificacao` (método `enviar(lead, mensagem)`) e decide de onde e com
+que frequência chamar `FollowUpService.leads_elegiveis_agora()` /
+`executar_followup(...)`:
+
+```python
+from app.qualificacao.instancias import followup_service
+
+class MeuCanalWhatsApp:
+    def enviar(self, lead, mensagem: str) -> None:
+        ...  # integração real da Pessoa 4
+
+for estrategia in followup_service.leads_elegiveis_agora():
+    followup_service.executar_followup(estrategia.lead_id, MeuCanalWhatsApp())
+```
+
+## Pontos de extensão opcionais
+
+- `GeradorTextoFollowUp` (em `followup.py`): plugar geração de texto via LLM no lugar do template padrão.
+- `EnriquecedorLLM` (em `resumo.py`): plugar um cliente LLM para preencher `pontos_relevantes` no resumo.
+- `Relogio` (em `tempo.py`): fonte de tempo injetável, usada em todo o módulo para permitir testar follow-up/agendamento sem esperar tempo real.
+- `LeadRepository` / `AgendaRepository`: Protocols de persistência — a implementação padrão é em memória (`InMemoryLeadRepository`, `InMemoryAgendaRepository`); podem ser trocadas por um repositório real sem mudar a lógica de negócio.
+
+## Configuração
+
+Toda a configuração é declarativa em
+[backend/app/qualificacao/config.py](backend/app/qualificacao/config.py):
+campos obrigatórios por intenção, pesos de classificação, intervalos e número
+máximo de tentativas de follow-up, templates de mensagem, e parâmetros da
+agenda simulada (duração do slot, dias úteis gerados, horário comercial). Não
+depende de nenhuma variável de ambiente nova.
+
+## Rodando os testes
+
+cd backend
+python -m pytest tests/test_qualificacao.py tests/test_classificacao.py tests/test_agendamento.py tests/test_followup.py tests/test_resumo.py -v
+
+Os testes cobrem os três cenários da proposta (compra, investimento,
+follow-up) e casos de borda: dado contraditório, lead que volta a responder,
+conflito de agenda e tentativas de follow-up esgotadas. Usam um relógio falso
+injetado (sem depender de `sleep`/tempo real).
