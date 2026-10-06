@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { ChatProvider } from "./context/ChatContext";
+import DashboardPage from "./pages/DashboardPage";
 import HomePage from "./pages/HomePage";
 import ImovelDetalhePage from "./pages/ImovelDetalhePage";
 import ImoveisPage from "./pages/ImoveisPage";
@@ -14,6 +15,7 @@ export default function App() {
           <Route index element={<HomePage />} />
           <Route path="imoveis" element={<ImoveisPage />} />
           <Route path="imoveis/:id" element={<ImovelDetalhePage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
