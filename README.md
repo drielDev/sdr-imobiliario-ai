@@ -2,27 +2,54 @@
 
 ## Visão Geral
 
-Projeto de POC para um Agente SDR Imobiliário com IA Generativa. A solução cobre catálogo de imóveis, busca estruturada, busca semântica com RAG, um agente de chat (Bia) com LLM via Gemini, e exposição via API FastAPI + interface web em React.
+Projeto de POC para um Agente SDR Imobiliário com IA Generativa. A solução cobre catálogo de imóveis, busca estruturada, busca semântica com RAG, um agente de chat (Bia) com LLM via Gemini, qualificação de leads (classificação, agendamento, follow-up e resumo para o corretor), e exposição via API FastAPI + interface web em React com painel do corretor.
 
 ## Arquitetura da Solução
 
 ```mermaid
 flowchart LR
-    A[data/imoveis.json] --> B[ImovelRepository]
-    B --> C[CatalogoService]
-    B --> D[ImovelRAG]
-    D --> E[Chroma / chroma_db]
+    subgraph Catalogo[Catálogo + RAG]
+        A[data/imoveis.json] --> B[ImovelRepository]
+        B --> C[CatalogoService]
+        B --> D[ImovelRAG]
+        D --> E[Chroma / chroma_db]
+    end
+
+    subgraph Qualificacao[Qualificação]
+        Q1[Lead + classificação]
+        Q2[AgendaService]
+        Q3[FollowUpService]
+        Q4[Resumo p/ corretor]
+    end
+
+    subgraph Integracao[Integração]
+        AT[atendimento.atender]
+        TL[Ferramentas de lead/agenda]
+        FU[CanalChat + job de follow-up]
+        RI[EnriquecedorGemini]
+    end
+
     C --> T1[buscar_imoveis_estruturado]
     D --> T2[buscar_imoveis_semantico]
     T1 --> AG[AgenteSDR / Gemini]
     T2 --> AG
-    AG --> CH[Endpoint /chat]
-    D --> F[Endpoints /imoveis/rag]
-    C --> G[Endpoints /imoveis/buscar]
-    G --> H[FastAPI / docs]
-    F --> H
-    CH --> H
-    H --> FE[Frontend React]
+    TL --> AG
+    TL --> Q1
+    TL --> Q2
+    AT --> AG
+    AT --> Q1
+    Q3 --> FU
+    FU --> AG
+    RI --> Q4
+
+    AT --> CH["/chat"]
+    FU --> CH
+    C --> IM["/imoveis"]
+    Q1 --> DB["/dashboard e /leads"]
+    Q4 --> DB
+    CH --> FE[Frontend React]
+    IM --> FE
+    DB --> FE
 ```
 
 ### Componentes
@@ -40,7 +67,11 @@ flowchart LR
 - [backend/app/api/chat.py](backend/app/api/chat.py): endpoints do chat.
 - [backend/app/qualificacao/](backend/app/qualificacao/): qualificação de leads, classificação, agendamento, follow-up e resumo para o corretor (ver seção própria abaixo).
 - [backend/app/api/leads.py](backend/app/api/leads.py): endpoints de leads, agendamento e follow-up.
+- [backend/app/integracao/](backend/app/integracao/): cola entre os módulos — transforma cada conversa em lead, dá à Bia ferramentas de qualificação/agenda, dispara o follow-up e gera o resumo com IA (ver seção "Interface e Integração").
+- [backend/app/api/dashboard.py](backend/app/api/dashboard.py): endpoints do painel do corretor.
 - [frontend/src/components/ChatWidget.jsx](frontend/src/components/ChatWidget.jsx): widget de chat flutuante que conversa com a Bia.
+- [frontend/src/pages/DashboardPage.jsx](frontend/src/pages/DashboardPage.jsx): painel do corretor (métricas, leads, agendamentos, resumo e follow-up).
+- [frontend/src/lib/](frontend/src/lib/): cliente da API, formatação e rótulos usados pelas páginas.
 
 ## Agente de Chat (LLM)
 
@@ -88,6 +119,15 @@ python scripts/chat_cli.py
 
 Backend e frontend ficam em pastas separadas: `backend/` e `frontend/`.
 
+> [!IMPORTANT]
+> **O projeto precisa de uma chave de API do Gemini para funcionar.** Antes de
+> rodar o backend, coloque sua chave no arquivo `backend/.env` (passo 5 abaixo).
+> Sem ela, a Bia não responde (o chat retorna erro `503`) e o resumo com IA e o
+> follow-up gerado pela Bia ficam indisponíveis. A chave pode ser gerada
+> gratuitamente em https://aistudio.google.com/apikey. Se a API retornar
+> `429 RESOURCE_EXHAUSTED`, a cota ou o limite de gastos do projeto da chave
+> acabou: ajuste em https://ai.studio/spend ou use outra chave.
+
 ### Backend
 
 ### 1. Entrar na pasta
@@ -108,15 +148,26 @@ Windows:
 
 pip install -r requirements.txt
 
-### 5. Rodar API
+### 5. Configurar a chave da API
+
+Crie (ou edite) o arquivo `backend/.env` com a sua chave do Gemini:
+
+```
+GEMINI_API_KEY=sua_chave_da_api_do_gemini
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Não compartilhe a chave nem a envie para o repositório.
+
+### 6. Rodar API
 
 uvicorn app.main:app --reload
 
-### 6. Documentação
+### 7. Documentação
 
 http://localhost:8000/docs
 
-### 7. Indexar a base de imóveis
+### 8. Indexar a base de imóveis
 
 python scripts/indexar_imoveis.py
 
@@ -130,9 +181,13 @@ python scripts/indexar_imoveis.py --sem-validacao
 
 ### Frontend
 
+Requer Node.js 20.19+ (ou 22.12+), exigência do Vite 8.
+
 cd frontend
 npm install
 npm run dev
+
+Acesse http://localhost:5173 (site + chat) e http://localhost:5173/dashboard (painel do corretor).
 
 
 # Catálogo de imóveis
@@ -338,3 +393,64 @@ Os testes cobrem os três cenários da proposta (compra, investimento,
 follow-up) e casos de borda: dado contraditório, lead que volta a responder,
 conflito de agenda e tentativas de follow-up esgotadas. Usam um relógio falso
 injetado (sem depender de `sleep`/tempo real).
+# Interface e Integração
+
+Camada que junta catálogo, agente e qualificação num produto demonstrável.
+O código de integração fica em [backend/app/integracao/](backend/app/integracao/)
+e não altera a lógica de negócio dos outros módulos — só os conecta.
+
+## Fluxo de uma mensagem
+
+1. O widget de chat envia `POST /chat/` com `sessao_id` + `mensagem`. O `sessao_id` fica salvo no `localStorage`, então a conversa continua depois de recarregar a página (o histórico é restaurado via `GET /chat/{sessao_id}/historico`).
+2. [atendimento.py](backend/app/integracao/atendimento.py) garante que existe um **lead** para a sessão (`lead.id == sessao_id`), registra a interação (atualiza `ultima_interacao_em` e zera o follow-up se o cliente voltou) e repassa a mensagem para a Bia.
+3. A Bia (Gemini com function calling) decide sozinha quais ferramentas usar:
+   - `buscar_imoveis_estruturado` / `buscar_imoveis_semantico` — catálogo e RAG;
+   - `registrar_dados_lead` — grava intenção, região, orçamento, quartos, urgência, perfil, ticket, expectativa de retorno, imóvel de interesse, nome e contato. Devolve o que ainda falta descobrir, e a Bia usa isso para escolher a próxima pergunta;
+   - `listar_horarios_disponiveis` / `agendar_horario` — agenda simulada, com roteamento automático (investimento → especialista, imóvel específico → visita, demais → corretor).
+
+   As ferramentas de lead ([tools_lead.py](backend/app/integracao/tools_lead.py)) descobrem o lead pela sessão atual (`contextvars`), nunca por um id escolhido pelo modelo.
+4. A cada atualização o lead é reclassificado (quente/morno/frio) e aparece no painel.
+
+## Follow-up automático
+
+- [followup.py](backend/app/integracao/followup.py) implementa o `CanalNotificacao` da qualificação como `CanalChat`: a mensagem entra no **histórico da Bia** (ela mantém o contexto quando o cliente responder) e numa caixa de saída que o frontend consulta a cada 15 s (`GET /chat/{sessao_id}/pendentes`). Se o chat estiver fechado, o botão mostra um contador de mensagens não lidas.
+- O texto é escrito pela própria Bia a partir da conversa (implementação do `GeradorTextoFollowUp`), no tom de cada tentativa e terminando com a próxima pergunta que falta. Se a LLM falhar, usa o template padrão da qualificação.
+- Um job assíncrono, iniciado no `lifespan` da API, roda `leads_elegiveis_agora()` periodicamente e envia a próxima tentativa (intervalos e templates em `qualificacao/config.py`).
+- Variável de ambiente opcional: `FOLLOWUP_INTERVALO_SEGUNDOS` (padrão `60`; `0` desliga o job).
+
+## Painel do corretor (`/dashboard`)
+
+- **Métricas**: total de leads, leads quentes, qualificados, agendamentos ativos, follow-ups pendentes/enviados e distribuição por temperatura. Atualiza sozinho a cada 10 s.
+- **Leads**: tabela filtrável por temperatura, com intenção, status e última interação.
+- **Próximos agendamentos**.
+- **Resumo do lead** (ao clicar numa linha): próximo passo sugerido, perfil e critérios, motivos da classificação, agendamento, conversa completa, botão **Gerar com IA** (o Gemini lê a conversa e lista os pontos relevantes para o corretor — implementação do `EnriquecedorLLM`) e botão **Disparar agora** para o follow-up.
+
+### Endpoints do painel
+
+- `GET /dashboard/metricas` — números agregados.
+- `GET /dashboard/leads` — leads com temperatura, status, follow-ups e próximo agendamento.
+- `GET /dashboard/agendamentos` — agendamentos ativos com nome/contato do lead.
+- `GET /dashboard/leads/{id}?com_ia=false` — resumo para o corretor + conversa; `com_ia=true` preenche `pontos_relevantes` via Gemini.
+- `POST /dashboard/leads/{id}/followup` — envia a próxima tentativa de follow-up agora (ignora o intervalo de inatividade).
+- `POST /dashboard/followup/executar` — roda a mesma rodada de follow-up que o job.
+
+## Roteiro de demonstração
+
+1. Suba o backend e o frontend. Abra o site e o `/dashboard` em abas lado a lado.
+2. **Compra**: no chat, "Estou procurando apartamento na zona sul". Responda às perguntas da Bia (orçamento, quartos, prazo) e veja o lead esquentar no painel.
+3. Quando a Bia oferecer horários, escolha um e informe nome e telefone. O agendamento aparece em "Próximos agendamentos".
+4. **Investimento**: clique em "Nova conversa" (↻) no chat e diga "Quero investir em imóveis para renda". A Bia investiga ticket e retorno esperado e oferece reunião com o especialista.
+5. **Follow-up**: inicie uma conversa e pare de responder. No painel, abra o lead e clique em **Disparar agora** — a mensagem aparece no chat do cliente (com contador se o chat estiver fechado). Responda e veja as tentativas zerarem.
+6. No resumo do lead, clique em **Gerar com IA** para ver os pontos relevantes da conversa.
+
+## Testes da integração
+
+cd backend
+python -m pytest tests/test_integracao.py -v
+
+Os testes usam um agente falso no lugar do Gemini (que executa um roteiro de chamadas de ferramenta) e um stub do catálogo, então rodam sem chave de API e sem baixar o modelo de embeddings.
+
+## Limitações da POC
+
+- Leads, agenda e sessões de chat ficam em memória: reiniciar a API zera tudo. Os repositórios seguem Protocols (`LeadRepository`, `AgendaRepository`) e podem ser trocados por um banco sem mexer na lógica.
+- O canal de follow-up é o próprio chat web; WhatsApp seria outra implementação de `CanalNotificacao`.
