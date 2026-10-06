@@ -17,6 +17,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+# ...mas a pasta lib/ do frontend é código-fonte e precisa ir pro repositório
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
