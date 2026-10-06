@@ -61,6 +61,7 @@ class Lead(BaseModel):
     id: str
     canal: str
     contato: str
+    nome: str | None = None
 
     intencao: Intencao = Intencao.INDEFINIDA
     regiao: str | None = None
