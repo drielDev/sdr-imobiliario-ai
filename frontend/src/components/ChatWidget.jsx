@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatWidget } from "../context/ChatContext";
-import { enviarMensagem } from "../lib/api";
+import {
+  buscarMensagensPendentes,
+  enviarMensagem,
+  obterHistorico,
+  reiniciarConversa,
+} from "../lib/api";
 import ChatInput from "./ChatInput";
 import ChatMessage from "./ChatMessage";
-import { IconChat, IconClose, IconExpand, IconShrink } from "./icons";
+import {
+  IconChat,
+  IconClose,
+  IconExpand,
+  IconRefresh,
+  IconShrink,
+} from "./icons";
 import TypingIndicator from "./TypingIndicator";
 
 const MENSAGEM_BOAS_VINDAS = {
@@ -13,20 +24,103 @@ const MENSAGEM_BOAS_VINDAS = {
     "Olá! Eu sou a **Bia**, assistente virtual de imóveis. 🏠\n\nMe conta o que você procura: quer **comprar**, **alugar** ou está pensando em **investir**?",
 };
 
+const CHAVE_SESSAO = "sdr-imobiliario:sessao-id";
+const INTERVALO_PENDENTES_MS = 15000;
+
 function criarId() {
   return crypto.randomUUID();
+}
+
+// A sessão fica no navegador para a conversa continuar depois de recarregar
+// a página (o histórico em si mora no backend).
+function sessaoSalva() {
+  try {
+    const existente = localStorage.getItem(CHAVE_SESSAO);
+    if (existente) return existente;
+    const nova = criarId();
+    localStorage.setItem(CHAVE_SESSAO, nova);
+    return nova;
+  } catch {
+    return criarId();
+  }
+}
+
+function novaSessao() {
+  const nova = criarId();
+  try {
+    localStorage.setItem(CHAVE_SESSAO, nova);
+  } catch {
+    // sem localStorage: a sessão vale só enquanto a página estiver aberta
+  }
+  return nova;
 }
 
 export default function ChatWidget() {
   const { aberto, abrirChat, fecharChat, rascunho, consumirRascunho } =
     useChatWidget();
 
-  const [sessaoId] = useState(criarId);
+  const [sessaoId, setSessaoId] = useState(sessaoSalva);
   const [mensagens, setMensagens] = useState([MENSAGEM_BOAS_VINDAS]);
   const [texto, setTexto] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [expandido, setExpandido] = useState(false);
+  const [naoLidas, setNaoLidas] = useState(0);
   const fimDaListaRef = useRef(null);
+  const abertoRef = useRef(aberto);
+
+  useEffect(() => {
+    abertoRef.current = aberto;
+    if (aberto) setNaoLidas(0);
+  }, [aberto]);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    obterHistorico(sessaoId)
+      .then((historico) => {
+        if (cancelado || historico.length === 0) return;
+        setMensagens([
+          MENSAGEM_BOAS_VINDAS,
+          ...historico.map((m) => ({
+            id: criarId(),
+            role: m.papel === "user" ? "user" : "assistant",
+            content: m.texto,
+          })),
+        ]);
+      })
+      .catch(() => {
+        // sem histórico (API fora do ar ou sessão nova): segue com as boas-vindas
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [sessaoId]);
+
+  // Follow-up: mensagens que a Bia manda sozinha quando o cliente some.
+  useEffect(() => {
+    const intervalo = setInterval(async () => {
+      try {
+        const pendentes = await buscarMensagensPendentes(sessaoId);
+        if (pendentes.length === 0) return;
+        setMensagens((atual) => [
+          ...atual,
+          ...pendentes.map((p) => ({
+            id: criarId(),
+            role: "assistant",
+            content: p.texto,
+          })),
+        ]);
+        if (!abertoRef.current) {
+          setNaoLidas((n) => n + pendentes.length);
+        }
+      } catch {
+        // tenta de novo no próximo ciclo
+      }
+    }, INTERVALO_PENDENTES_MS);
+
+    return () => clearInterval(intervalo);
+  }, [sessaoId]);
 
   useEffect(() => {
     if (aberto && rascunho) {
@@ -39,6 +133,13 @@ export default function ChatWidget() {
       fimDaListaRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [mensagens, carregando, aberto]);
+
+  function handleNovaConversa() {
+    reiniciarConversa(sessaoId).catch(() => {});
+    setSessaoId(novaSessao());
+    setMensagens([MENSAGEM_BOAS_VINDAS]);
+    setTexto("");
+  }
 
   async function handleEnviar() {
     const mensagemUsuario = texto.trim();
@@ -92,6 +193,16 @@ export default function ChatWidget() {
             </div>
             <button
               type="button"
+              onClick={handleNovaConversa}
+              disabled={carregando}
+              aria-label="Nova conversa"
+              title="Nova conversa"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+            >
+              <IconRefresh className="h-[18px] w-[18px]" />
+            </button>
+            <button
+              type="button"
               onClick={() => setExpandido((v) => !v)}
               aria-label={expandido ? "Reduzir chat" : "Expandir chat"}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
@@ -139,6 +250,11 @@ export default function ChatWidget() {
           <IconClose className="h-6 w-6" />
         ) : (
           <IconChat className="h-6 w-6" />
+        )}
+        {!aberto && naoLidas > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white ring-2 ring-white dark:ring-slate-950">
+            {naoLidas}
+          </span>
         )}
       </button>
     </>

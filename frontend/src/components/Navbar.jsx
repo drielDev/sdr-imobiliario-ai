@@ -5,6 +5,7 @@ import { IconChat, IconHouse } from "./icons";
 const LINKS = [
   { to: "/", label: "Início", fim: true },
   { to: "/imoveis", label: "Imóveis" },
+  { to: "/dashboard", label: "Painel do corretor" },
 ];
 
 export default function Navbar() {
