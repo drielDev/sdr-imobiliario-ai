@@ -1,0 +1,41 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      FOLLOWUP_INTERVALO_SEGUNDOS: ${FOLLOWUP_INTERVALO_SEGUNDOS:-60}
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/app/chroma_db
+      - huggingface_cache:/home/app/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+volumes:
+  chroma_data:
+  huggingface_cache:

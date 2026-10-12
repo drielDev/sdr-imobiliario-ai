@@ -119,6 +119,25 @@ python scripts/chat_cli.py
 
 Backend e frontend ficam em pastas separadas: `backend/` e `frontend/`.
 
+### Executar com Docker
+
+Com Docker Compose instalado, execute na raiz do repositório:
+
+```sh
+docker compose up --build
+```
+
+O frontend fica em http://localhost:5173 e a documentação da API em http://localhost:8000/docs. Na primeira inicialização, o backend indexa o catálogo e baixa o modelo de embeddings; esse processo pode demorar. O índice Chroma e o cache dos modelos são mantidos em volumes Docker. Para habilitar o chat, configure `backend/.env` com `GEMINI_API_KEY` antes de iniciar.
+
+Para gerar o relatório técnico em PDF:
+
+```sh
+python -m pip install -r docs/requirements-relatorio.txt
+python docs/gerar_relatorio.py
+```
+
+O PDF e sua fonte Markdown ficam em `docs/`.
+
 > [!IMPORTANT]
 > **O projeto precisa de uma chave de API do Gemini para funcionar.** Antes de
 > rodar o backend, coloque sua chave no arquivo `backend/.env` (passo 5 abaixo).
